@@ -1,0 +1,225 @@
+---
+title: "lefse"
+output: html_document
+ 
+  html_document: 
+    toc: yes
+    toc_float: True 
+  pdf_document: default
+---
+
+          
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+
+```{r}
+library(vegan)
+library(picante)
+library(phyloseq)
+library(ggplot2)
+library(GUniFrac)
+library(plyr)
+library(ggpubr)
+library(microbiome)
+library(cowplot)
+library(patchwork)
+
+#create_physeq
+
+otu <- read.delim('C:/Users/lihui/Desktop/tiv16sa2001_qiime_output/feature-table.from_biom.txt', row.names = 1, sep = '\t', stringsAsFactors = FALSE, check.names = FALSE)
+otumat1<- t(otu)
+otumat2 <- Rarefy(otumat1, 10000)
+otumat<- t(otumat2[["otu.tab.rff"]])
+
+metadata<- read.csv('C:/Users/lihui/Desktop/tiv16sa2001_qiime_output/core_metrics_results_no_mitochondria_no_chloroplast/metadata_tiv2020.csv',header = T, sep = ',',row.names = 1)
+sub_metadata<- metadata[colnames(otumat),]
+
+taxmat<- read.table('C:/Users/lihui/Desktop/tiv16sa2001_qiime_output/tax2001.txt', header = T, sep = '\t', row.names = 1)
+taxmat<- as.matrix(taxmat)
+
+tree<- read.tree('C:/Users/lihui/Desktop/tiv16sa2001_qiime_output/tree.nwk')
+
+OTU = otu_table(otumat, taxa_are_rows = TRUE)
+TAX = tax_table(taxmat)
+sampledata<- sample_data(sub_metadata)
+
+physeq = merge_phyloseq(OTU, TAX)
+physeq1 = merge_phyloseq(physeq, sampledata, tree)
+physeq2 = merge_phyloseq(OTU, TAX, sampledata, tree)
+identical(physeq1, physeq2)
+
+#sub_group
+physeq.tibetan.grade2019.stage4<- subset_samples(physeq1, type=="fecal" & national=="tibetan" & grade=="grade_2019"& stage=="stage4")
+physeq.han.grade2019<- subset_samples(physeq1, type=="fecal" & national=="han")
+
+physeq.tib<- merge_phyloseq(physeq.tibetan.grade2019.stage4, physeq.han.grade2019)
+physeq.tib.p <- prune_taxa(taxa_sums(physeq.tib) > 0, physeq.tib)
+
+
+
+##phyloseq to lefse
+##lefse with phyloseq data
+library(yingtools2)
+lefse(physeq.tib.p, class="national", levels = "Genus")
+
+## go to terminal 
+# lefse.bat
+
+LDA<- read.table('C:/Users/lihui/Desktop/test/LDA.data.txt', header = F, sep = '\t')
+LDA.sel<- na.omit(LDA)
+colnames(LDA.sel)<- c("genus", "non", "group", "lda", "padj")
+
+han<- subset(LDA.sel, group %in% c("han"))
+tibetan<- subset(LDA.sel, group %in% c("tibetan"))
+data1<- arrange(tibetan, lda)
+data2<- arrange(han, lda)
+LDA.data<- rbind(data1, data2)
+LDA.data$genus = factor(LDA.data$genus, levels=LDA.data$genus)
+LDA.data$p<- as.numeric(as.character(LDA.data$padj))
+LDA.data$p.adj<- LDA.data$p
+LDA.data$p.adj[LDA.data$p.adj < 0.0001] = 4
+LDA.data$p.adj[LDA.data$p.adj >=0.0001& LDA.data$p.adj < 0.001] = 3
+LDA.data$p.adj[LDA.data$p.adj >=0.001& LDA.data$p.adj < 0.01] = 2
+LDA.data$p.adj[LDA.data$p.adj >=0.01& LDA.data$p.adj < 0.05] = 1
+
+p.lda<- ggplot(LDA.data, aes(lda, genus)) +
+    geom_point(aes(color = group, size=p.adj)) +
+    scale_color_manual(values = c('red','black')) +
+    theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent')) +
+    theme(legend.key = element_rect(fill = 'transparent'), legend.background = element_rect(fill = 'transparent')) +
+    geom_vline(xintercept = c(2.5, 2.8, 3.2, 3.6), color = 'blue', size = 0.5, lty= "dashed") +
+    labs(title="LEfSe", x = 'LDA score')+ 
+    theme(axis.text.x = element_text(angle=90, hjust=1, vjust=.5,size=12), axis.title.y=element_blank(),axis.text.y = element_blank()) +
+    geom_segment(aes(x=2.4, xend=lda, y=genus, yend=genus))+
+    background_grid(major = "y", minor = "none")+
+    theme(axis.text.x = element_text(angle=90, hjust=1, vjust=.5,size=12))+ # 设置x.y坐标上文本大小
+    theme(title=element_text(size=14,color="#4F4F4F"))+
+    theme(plot.title = element_text(hjust = 0.5))+
+    scale_size("p.adj",breaks=c(1,2,3,4),
+    labels=c("0.01~0.05","0.001~0.01","0.0001~0.001","<0.0001"))
+    
+ra.genus<- read.table('C:/Users/lihui/Desktop/test/lefse.txt', header = T, sep = '\t', row.names = 1)
+colnames(ra.genus)<- colnames(physeq.tib.p@otu_table@.Data)
+sub.ra.genus<- ra.genus[as.character(LDA.data$genus),]
+
+meta<- meta(physeq.tib.p)
+tibetan.ra<- sub.ra.genus[,rownames(subset(meta, national %in% c("tibetan")))]
+han.ra<- sub.ra.genus[,rownames(subset(meta, national %in% c("han")))]
+
+c<- row.names(han.ra)
+                      
+prevalences <- seq(.05, 1, .05)
+detections <- 10^seq(log10(1e-5), log10(max(abundances(han.ra))), length = 50)
+
+gray <- gray(seq(1,0,length=5))
+p.han <- plot_core(han.ra, plot.type = "heatmap", 
+                prevalences = prevalences,
+                detections = detections,
+                colours = gray,
+                horizontal = FALSE, taxa.order = c)+
+                theme(axis.text.x = element_text(angle=90, hjust=1, vjust=.5,size=10), axis.title.y=element_blank(),axis.text.y = element_blank()) +
+                theme(title=element_blank())+
+                theme(title=element_text(size=14, color="#4F4F4F") )+
+                theme(legend.position=c(-0.033,-0.55))+
+                labs(title="Han",x = 'RA%')+
+    theme(panel.grid = element_blank(), panel.background = element_rect(color = 'red', fill = 'transparent'))+
+    theme(plot.title = element_text(hjust = 0.5))+
+    geom_vline(xintercept = c(0.0001, 0.01), color = 'blue', size = 0.5, lty= "dashed") 
+
+p.tibetan <- plot_core(tibetan.ra, plot.type = "heatmap", 
+                prevalences = prevalences,
+                detections = detections,
+                colours = gray,
+                horizontal = FALSE, taxa.order = c)+ 
+                theme(axis.text.x = element_text(angle=90, hjust=1, vjust=.5,size=10)) +
+                theme(title=element_text(size=14, color="#4F4F4F") )+
+                theme(legend.position='none')+
+                labs(title="Tibetan", x = 'RA%')+
+    theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'))+
+    theme(plot.title = element_text(hjust = 0.5))+
+    geom_vline(xintercept = c(0.0001, 0.01), color = 'blue', size = 0.5, lty= "dashed")
+
+p.tibetan | p.han | p.lda
+
+```
+
+# tree + core-microbiome + lefse
+```{r}
+data<- genus.p@tax_table@.Data
+data1<- as.data.frame(data)
+data2<- data1[!duplicated(data1$Genus), ]
+c1<- rownames(subset(data2, Genus %in% c(c)))
+ex1 = prune_taxa(c1, genus.p)
+
+p<- ggtree(ex1, aes(color=Phylum), size=1 )+ theme_tree2()+  theme(legend.position = c(0.15,0.8))+ geom_tiplab(aes(label=Genus),align=TRUE, linesize=.5)+ geom_tippoint(aes(color=Phylum), size=2)
+
+c.new<- na.omit(p$data[!duplicated(p$data$Genus),]$Genus)
+
+p.tree<- ggtree(ex1, aes(color=Phylum), size=1 )+ 
+  geom_tiplab(aes(label=Genus),align=T, linesize=.5)+ 
+  geom_tippoint(aes(color=Phylum), size=2)+ coord_cartesian(clip = 'off')+
+  theme_tree2(plot.margin=margin(0, 110, 6, 6))+  
+  theme(legend.position = c(0.15, 0.8))
+
+LDA.data<- LDA.sel[match(c.new, LDA.sel$genus),]
+LDA.data$genus = factor(LDA.data$genus, levels=LDA.data$genus)
+LDA.data$p<- as.numeric(as.character(LDA.data$padj))
+LDA.data$p.adj<- LDA.data$p
+LDA.data$p.adj[LDA.data$p.adj < 0.0001] = 4
+LDA.data$p.adj[LDA.data$p.adj >=0.0001& LDA.data$p.adj < 0.001] = 3
+LDA.data$p.adj[LDA.data$p.adj >=0.001& LDA.data$p.adj < 0.01] = 2
+LDA.data$p.adj[LDA.data$p.adj >=0.01& LDA.data$p.adj < 0.05] = 1
+
+p.lda<- ggplot(LDA.data, aes(lda, genus)) +
+    geom_point(aes(color = group, size=p.adj)) +
+    scale_color_manual(values = c('red','black')) +
+    theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent')) +
+    theme(legend.key = element_rect(fill = 'transparent'), legend.background = element_rect(fill = 'transparent')) +
+    geom_vline(xintercept = c(2.5, 2.8, 3.2, 3.6), color = 'blue', size = 0.5, lty= "dashed") +
+    labs(title="LEfSe", x = 'LDA score')+ 
+    theme(axis.text.x = element_text(angle=90, hjust=1, vjust=.5,size=12), axis.title.y=element_blank(),axis.text.y = element_blank()) +
+    geom_segment(aes(x=2.4, xend=lda, y=genus, yend=genus))+
+    background_grid(major = "y", minor = "none")+
+    theme(axis.text.x = element_text(angle=90, hjust=1, vjust=.5,size=12))+ # 设置x.y坐标上文本大小
+    theme(title=element_text(size=14,color="#4F4F4F"))+
+    theme(plot.title = element_text(hjust = 0.5))+
+    scale_size("p.adj",breaks=c(1,2,3,4),
+    labels=c("0.01~0.05","0.001~0.01","0.0001~0.001","<0.0001"))
+ 
+
+p.han <- plot_core(han.ra, plot.type = "heatmap", 
+                prevalences = prevalences,
+                detections = detections,
+                colours = gray,
+                horizontal = FALSE, taxa.order = c.new)+
+                theme(axis.text.x = element_text(angle=90, hjust=1, vjust=.5,size=10), axis.title.y=element_blank(),axis.text.y = element_blank()) +
+                theme(title=element_blank())+
+                theme(title=element_text(size=14, color="#4F4F4F") )+
+                theme(legend.position=c(-0.033,-0.55))+
+                labs(title="Han",x = 'RA%')+
+    theme(panel.grid = element_blank(), panel.background = element_rect(color = 'red', fill = 'transparent'))+
+    theme(plot.title = element_text(hjust = 0.5))+
+    geom_vline(xintercept = c(0.0001, 0.01), color = 'blue', size = 0.5, lty= "dashed") 
+
+p.tibetan <- plot_core(tibetan.ra, plot.type = "heatmap", 
+                prevalences = prevalences,
+                detections = detections,
+                colours = gray,
+                horizontal = FALSE, taxa.order = c.new)+ 
+                theme(axis.text.x = element_text(angle=90, hjust=1, vjust=.5,size=10), axis.title.y=element_blank(),axis.text.y = element_blank()) +
+                theme(title=element_text(size=14, color="#4F4F4F") )+
+                theme(legend.position='none')+
+                labs(title="Tibetan", x = 'RA%')+
+    theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'))+
+    theme(plot.title = element_text(hjust = 0.5))+
+    geom_vline(xintercept = c(0.0001, 0.01), color = 'blue', size = 0.5, lty= "dashed")
+
+p.tree + p.tibetan + p.han + p.lda + plot_layout(nrow = 1, widths = c(2,1 ,1, 1))
+
+```
