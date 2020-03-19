@@ -151,6 +151,7 @@ p.tibetan | p.han | p.lda
 
 # tree + core-microbiome + lefse
 ```{r}
+genus.p = tax_glom(physeq.tib.p, "Genus")
 data<- genus.p@tax_table@.Data
 data1<- as.data.frame(data)
 data2<- data1[!duplicated(data1$Genus), ]
